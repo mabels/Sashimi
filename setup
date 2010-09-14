@@ -1,0 +1,7 @@
+#!/bin/sh
+ifconfig $1 172.20.20.1 pointopoint 172.20.20.2 up
+#route add -net 172.21.21.0 netmask 255.255.255.0 gw 172.20.20.2
+#ifconfig tun1 172.20.20.2 172.20.20.1 up
+#route add -net 172.21.21.0 netmask 255.255.255.0 gw 172.20.20.2
+#ping 172.20.20.1
+

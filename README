@@ -1,0 +1,19 @@
+It's just good enough to run a conference 
+
+but a far away from a good piece of software
+
+to start the server 
+
+sudo tun server ip:port
+
+to start a client
+
+sudo tun client srcip:destip:port srcip:destip:port srcip:destip:port
+currently not implemented with the srcip
+
+where is the bind call for net.createConnection
+
+you need 
+ip route 
+ip rule 
+
