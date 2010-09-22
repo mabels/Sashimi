@@ -64,12 +64,13 @@ var streamer = function(stream, fn_closed) {
   var start = 0
   var ofs = 0
   var packet_length = -1
+  var drop = 0
   stream.on('connect', function() {
-console.log('client-connect')
+console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort)
     output_streams.push(stream)
   })
   var clear_output_streams = function() {
-console.log('client-close')
+console.log('client-close:'+stream.remoteAddress+":"+stream.remotePort)
     output_streams = _(output_streams).reject(function(s) { return s == stream })
     console.log('client-close')
     fn_closed && fn_closed()   
@@ -80,7 +81,12 @@ console.log('client-close')
   stream.on('error', clear_output_streams)
 
   stream.on('data', function(data) {
-    buffer.write(data, ofs, 'binary')  
+    try {
+	    buffer.write(data, ofs, 'binary')  
+    } catch (e) {
+console.log('drop output:'+(++drop))
+	return;
+    }
     ofs += data.length
     while (start != ofs) {
 //console.log('-1:'+start+":"+ofs+":"+packet_length+":"+wait_for_packet_length.toString())

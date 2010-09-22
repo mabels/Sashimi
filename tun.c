@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
 	for(i = 1; i <= argc;++i) {
 		cp_argv[i+2] = argv[i];
 	} 
-	execvp("/usr/local/bin/node", cp_argv);
+	execvp("../linux-x86_64/bin/node", cp_argv);
 
 
 }
