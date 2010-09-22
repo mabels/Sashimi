@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
 	snprintf(setup, sizeof(setup), "./setup %s", dev);
 	system(setup);
 
-	seteuid(1000);	
+	//seteuid(1000);	
 	char *cp_argv[argc+3];
 	cp_argv[0] = "node";
 	cp_argv[1] = "sashimi.js";
@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
 	for(i = 1; i <= argc;++i) {
 		cp_argv[i+2] = argv[i];
 	} 
-	execvp("./linux-x86_64/bin/node", cp_argv);
+	execvp("/usr/local/bin/node", cp_argv);
 
 
 }
