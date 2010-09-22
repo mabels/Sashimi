@@ -1,5 +1,13 @@
 #!/bin/sh
-ifconfig $1 172.20.20.1 pointopoint 172.20.20.2 up
+if [ $1 == 'server' ]
+then
+	my=172.20.20.1
+	peer=172.20.20.2
+else
+	my=172.20.20.2
+	peer=172.20.20.1
+fi
+ifconfig $2 $my pointopoint $peer up
 #route add -net 172.21.21.0 netmask 255.255.255.0 gw 172.20.20.2
 #ifconfig tun1 172.20.20.2 172.20.20.1 up
 #route add -net 172.21.21.0 netmask 255.255.255.0 gw 172.20.20.2

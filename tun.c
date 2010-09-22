@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
 	}
 	printf("allocated:%d:%s\n", fd, dev);
 	char setup[1024];
-	snprintf(setup, sizeof(setup), "./setup %s", dev);
+	snprintf(setup, sizeof(setup), "./setup %s %s", argv[1], dev);
 	system(setup);
 
 	//seteuid(1000);	
