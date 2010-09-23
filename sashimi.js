@@ -28,6 +28,7 @@ var tun_dev = split_host_port(process.argv[arg]).host // no nice but working
 var tun_fd =  split_host_port(process.argv[arg++]).port
 
 var mode = process.argv[arg++]
+var name = process.argv[arg++]
 
 var servers = []
 for(var i = arg; i < process.argv.length; ++i) {
@@ -122,7 +123,7 @@ if (mode == 'server') {
   })
 } else {
   var client_connect = function(server, stream) {
-console.log('Conect p='+server.port+":"+ server.host)
+console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server.my.host+":"+ server.my.port)
     stream = net.createConnection(server.peer.port, server.peer.host, {bind: server.my })   
     streamer(stream, function() {
       setTimeout(function() { client_connect(server, stream) }, 500)

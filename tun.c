@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
 	}
 	printf("allocated:%d:%s\n", fd, dev);
 	char setup[1024];
-	snprintf(setup, sizeof(setup), "./setup %s %s", argv[1], dev);
+	snprintf(setup, sizeof(setup), "./setup.%s \"%s\" \"%s\" \"%s\"", argv[2], argv[1], argv[2], dev);
 	system(setup);
 
 	//seteuid(1000);	
@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
 	for(i = 1; i <= argc;++i) {
 		cp_argv[i+2] = argv[i];
 	} 
-	execvp("../linux-x86_64/bin/node", cp_argv);
+	execvp("node", cp_argv);
 
 
 }
