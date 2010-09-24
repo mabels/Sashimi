@@ -21,6 +21,111 @@ var split_srv = function(str) {
   }
   return val
 }
+
+
+var packet_test_source = function(fn) {
+  var data=""
+  var maxlen = 1420;
+  var base = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  for(var i = 0; i < maxlen; ++i) { data += base[i%base.length] }
+  for(var loops = 0; loops < 10000; ++loops) {
+console.log('LOOP:'+loops)
+    for(var outlen = 0; outlen < 1400; ++outlen) {
+  //  { var outlen = 1
+  //console.log('outlen:'+outlen)    
+      var segsize = ~~(outlen/3)
+      if (segsize == 0) { segsize = 1 }
+      var blen = outlen + 4
+      var buffer = new Buffer(outlen + blen);    
+      buffer.write(((10000+outlen)+"").slice(1), "ascii") 
+      buffer.write(data.slice(0,outlen), "binary", 4) 
+     
+      for(var ofs = 0; ofs < blen; ofs += segsize) {
+        var rest = (blen - ofs)
+        if (rest > segsize) { rest = segsize }
+  //console.log("ofs="+ofs+":"+rest)
+        fn(buffer.slice(ofs, ofs + rest), rest, data.slice(0,outlen))
+      }
+      delete buffer
+    }
+  }
+  console.log('yeah done:'+loops*(outlen*(outlen+1))/2)
+}
+
+var Queue = function () {
+  this.queue = []
+}
+Queue.prototype.add = function(obj, wait_len, found_fn) {
+  // obj should by { data: data, ofs: 0, len: len }
+//console.log('ADD:'+JSON.stringify(obj))
+  if (obj) { 
+    if (obj.len == 0) { return }
+    this.queue.push(obj) 
+  }
+  if (wait_len == 0) {
+    found_fn(new Buffer(0), "")
+    return
+  }
+  var segs = 0
+  var need = wait_len
+  for (var i in this.queue) {
+    var qe = this.queue[i] 
+    var diff = qe.len - qe.ofs
+    ++segs
+    if (diff >= need) { 
+      var buffer = new Buffer(wait_len)
+      var buffer_ofs = 0
+      for (var i = 0; i < segs-1; ++i) {
+        /* all but last */
+        qe = this.queue.shift()
+        buffer.write(qe.data.toString().slice(qe.ofs, qe.len), "binary", buffer_ofs)
+        buffer_ofs += qe.len - qe.ofs
+        delete qe
+      }
+      qe = this.queue[0]
+      buffer.write(qe.data.toString().slice(qe.ofs, qe.ofs+need), "binary", buffer_ofs)
+      if (qe.ofs+need == qe.len) { delete this.queue.shift() }
+      else { this.queue[0].ofs += need }
+      found_fn(buffer, qe['test'] && qe.test)
+      break
+    } 
+    need -= diff
+  }
+}
+
+/*
+var queue = new Queue()
+var header = { active: true, len: 4, completed: function(data, test) {
+//console.log('found-hdlc:'+data)
+      header.active = false
+      packet.active = true
+      packet.len = ~~data
+      queue.add(null, packet.len, packet.completed)
+    }
+}
+var cnt = 0
+var packet = { active: false, len: 0, completed: function(data, test) {
+//console.log('found-packet:'+data.length+":"+data+":"+test.length)
+//cnt++
+      if (test && test.length && test != data) { console.log('DATA-ERROR: cnt='+cnt+':data='+data+":test="+test) }
+      header.active = true
+      packet.active = false
+      packet.len = 0
+      queue.add(null, header.len, header.completed)
+  }
+}
+source(function(data,len, test) {
+//console.log("in:"+len+":"+data+":"+test.length)
+  var obj = { data: data, ofs: 0, len: len, test: test }
+  if (header.active) {
+    queue.add(obj, header.len, header.completed)
+  } else if (packet.active) { 
+    queue.add(obj, packet.len, packet.completed)
+  }
+  
+})
+*/
+
 console.log(JSON.stringify(process.argv))
 
 arg = 2
