@@ -78,12 +78,12 @@ Queue.prototype.add = function(obj, wait_len, found_fn) {
       for (var i = 0; i < segs-1; ++i) {
         /* all but last */
         qe = this.queue.shift()
-        buffer.write(qe.data.toString().slice(qe.ofs, qe.len), "binary", buffer_ofs)
+        buffer.write(qe.data.slice(qe.ofs, qe.len), "binary", buffer_ofs)
         buffer_ofs += qe.len - qe.ofs
         delete qe
       }
       qe = this.queue[0]
-      buffer.write(qe.data.toString().slice(qe.ofs, qe.ofs+need), "binary", buffer_ofs)
+      buffer.write(qe.data.slice(qe.ofs, qe.ofs+need), "binary", buffer_ofs)
       if (qe.ofs+need == qe.len) { delete this.queue.shift() }
       else { this.queue[0].ofs += need }
       found_fn(buffer, qe['test'] && qe.test)
@@ -95,35 +95,7 @@ Queue.prototype.add = function(obj, wait_len, found_fn) {
 
 /*
 var queue = new Queue()
-var header = { active: true, len: 4, completed: function(data, test) {
-//console.log('found-hdlc:'+data)
-      header.active = false
-      packet.active = true
-      packet.len = ~~data
-      queue.add(null, packet.len, packet.completed)
-    }
-}
-var cnt = 0
-var packet = { active: false, len: 0, completed: function(data, test) {
-//console.log('found-packet:'+data.length+":"+data+":"+test.length)
-//cnt++
-      if (test && test.length && test != data) { console.log('DATA-ERROR: cnt='+cnt+':data='+data+":test="+test) }
-      header.active = true
-      packet.active = false
-      packet.len = 0
-      queue.add(null, header.len, header.completed)
-  }
-}
-source(function(data,len, test) {
-//console.log("in:"+len+":"+data+":"+test.length)
-  var obj = { data: data, ofs: 0, len: len, test: test }
-  if (header.active) {
-    queue.add(obj, header.len, header.completed)
-  } else if (packet.active) { 
-    queue.add(obj, packet.len, packet.completed)
-  }
-  
-})
+
 */
 
 console.log(JSON.stringify(process.argv))
@@ -135,6 +107,11 @@ var tun_fd =  split_host_port(process.argv[arg++]).port
 var mode = process.argv[arg++]
 var name = process.argv[arg++]
 
+var key = {
+             my:   process.argv[arg++],
+             peer: process.argv[arg++]
+          }
+
 var servers = []
 for(var i = arg; i < process.argv.length; ++i) {
   servers.push(split_srv(process.argv[i]))
@@ -142,43 +119,66 @@ for(var i = arg; i < process.argv.length; ++i) {
 console.log('tun_dev='+tun_dev+' tun_fd='+tun_fd+" servers="+JSON.stringify(servers))
 
 var output_streams = []
-
-var packet_cnt = 0
+var input_cnt = 0
 var packet_input = function() {
   var packet = new Buffer(1600) 
   /* tun has a 4byte header i currently not know what this means */
   fs.read(tun_fd, packet, 4, packet.length-4, null, function(err, len) {
+    if (err) { console.log('err:'+err); return }
     var plen = (((len) + 10000)+'').slice(1)
 //console.log('plen='+plen) 
     packet.write(plen, 0, 'ascii')  
     if (output_streams.length > 0) {
-      var cnt = 0
-      packet_cnt++
+      ++input_cnt
 //console.log('send-plen='+len) 
-      output_streams[packet_cnt%output_streams.length].write(packet.slice(0,len+4))
+      try {
+        output_streams[input_cnt%output_streams.length].write(packet.slice(0,len+4))
+      } catch(e) {
+        output_streams[input_cnt%output_streams.length].destroy()
+      }
     }
     packet_input()
   })
 }
 
-packet_input()
-
+var output_cnt = 0
 var streamer = function(stream, fn_closed) {
   stream.setEncoding('binary')
-  var wait_for_packet_length = true
-  var buffer = new Buffer(16*1024*1024)
-  var start = 0
-  var ofs = 0
-  var packet_length = -1
-  var drop = 0
+  var connected = false
+  var wait_key_peer = true
+  //var buffer = new Buffer(16*1024*1024)
+  var queue = new Queue()
+  var header = { active: true, len: 4, completed: function(data, test) {
+  //console.log('found-hdlc:'+data)
+        header.active = false
+        packet.active = true
+        packet.len = ~~data
+        queue.add(null, packet.len, packet.completed)
+      }
+  }
+  var packet = { active: false, len: 0, completed: function(data, test) {
+  //console.log('found-packet:'+data.length+":"+data+":"+test.length)
+        ++output_cnt
+        //if (test && test.length && test != data) { console.log('DATA-ERROR: cnt='+cnt+':data='+data+":test="+test) }
+console.log('OUTPUT-2')
+        fs.write(tun_fd, data, 0, data.length) //, null) 
+        header.active = true
+        packet.active = false
+        packet.len = 0
+        queue.add(null, header.len, header.completed)
+    }
+  }
   stream.on('connect', function() {
-console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort)
+console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key.my)
     output_streams.push(stream)
+    stream.write(key.my, 'utf-8')
+    connected = true
   })
   var clear_output_streams = function() {
-console.log('client-close:'+stream.remoteAddress+":"+stream.remotePort)
+    connected && console.log('client-close:'+stream.remoteAddress+":"+stream.remotePort)
     output_streams = _(output_streams).reject(function(s) { return s == stream })
-    console.log('client-close')
+    connected && stream.destroy()
+    connected = false
     fn_closed && fn_closed()   
     fn_closed = false
   }
@@ -187,38 +187,25 @@ console.log('client-close:'+stream.remoteAddress+":"+stream.remotePort)
   stream.on('error', clear_output_streams)
 
   stream.on('data', function(data) {
-    try {
-	    buffer.write(data, ofs, 'binary')  
-    } catch (e) {
-console.log('drop output:'+(++drop))
-	return;
-    }
-    ofs += data.length
-    while (start != ofs) {
-//console.log('-1:'+start+":"+ofs+":"+packet_length+":"+wait_for_packet_length.toString())
-
-    if (wait_for_packet_length) {
-      if (ofs-start >= 4) {
-        wait_for_packet_length = false
-        packet_length = parseInt(buffer.toString('ascii', start, start+4),10)
-        start += 4
-              if (start == ofs) { ofs = start = 0 }
-      } else {
-        break
-      }
+//console.log('INPUT:'+JSON.stringify({})+":"+key.peer+":"+key.peer.length+":"+data.len+":"+typeof(data))    
+    var obj = { data: data, ofs: 0, len: data.length }
+    if (wait_key_peer) {
+      queue.add(obj, key.peer.length, function(in_key) {
+        if (in_key == key.peer) {
+          console.log('verified key='+in_key)
+          stream.setEncoding('binary')
+          wait_key_peer = false
+        } else {
+          console.log('not verified key='+in_key)
+          stream.destroy()
+        }
+      })
+      return
     } 
-    if (!wait_for_packet_length) {
-      if (ofs-start >= packet_length) {
-//console.log('-6-'+start+":"+ofs+":"+packet_length)
-        wait_for_packet_length = true
-        fs.write(tun_fd, buffer, start, packet_length) //, null) 
-        start += packet_length
-        packet_length = -1    
-              if (start == ofs) { ofs = start = 0 }
-      } else {
-        break
-      }
-    }
+    if (header.active) {
+      queue.add(obj, header.len, header.completed)
+    } else if (packet.active) { 
+      queue.add(obj, packet.len, packet.completed)
     }
   })
 }
@@ -237,3 +224,9 @@ console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server
   _(servers).each(function(server) { client_connect(server) })
 }
 
+
+packet_input()
+
+setInterval(function() { 
+  console.log("Status: i="+input_cnt+" o="+output_cnt)
+}, 1000)
