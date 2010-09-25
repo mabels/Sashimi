@@ -167,7 +167,6 @@ var streamer = function(stream, fn_closed, opts) {
   //console.log('found-packet:'+data.length+":"+data+":"+test.length)
         ++output_cnt
         //if (test && test.length && test != data) { console.log('DATA-ERROR: cnt='+cnt+':data='+data+":test="+test) }
-console.log('OUTPUT-2')
         fs.write(tun_fd, data, 0, data.length) //, null) 
         header.active = true
         packet.active = false
