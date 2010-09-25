@@ -1,3 +1,4 @@
+var sys = require('sys')
 var fs = require('fs')
 var net = require('net')
 var _ = require('underscore')._
@@ -114,7 +115,13 @@ var key = {
 
 var servers = []
 for(var i = arg; i < process.argv.length; ++i) {
-  servers.push(split_srv(process.argv[i]))
+  var arg = process.argv[i]
+  var no_output = arg.slice(0,1) 
+  if (no_output == '!') { arg = arg.slice(1)  }
+  var srv = split_srv(arg)
+  if (no_output == '!') { srv.no_output = true }
+  else { srv.no_output = false }
+  servers.push(srv)
 }
 console.log('tun_dev='+tun_dev+' tun_fd='+tun_fd+" servers="+JSON.stringify(servers))
 
@@ -142,7 +149,7 @@ var packet_input = function() {
 }
 
 var output_cnt = 0
-var streamer = function(stream, fn_closed) {
+var streamer = function(stream, fn_closed, opts) {
   stream.setEncoding('binary')
   var connected = false
   var wait_key_peer = true
@@ -169,8 +176,8 @@ console.log('OUTPUT-2')
     }
   }
   stream.on('connect', function() {
-console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key.my)
-    output_streams.push(stream)
+console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key.my+":"+opts['no_output'])
+    if (!(opts['no_output'] && opts.no_output)) { output_streams.push(stream) }
     stream.write(key.my, 'utf-8')
     connected = true
   })
@@ -215,11 +222,11 @@ if (mode == 'server') {
   })
 } else {
   var client_connect = function(server, stream) {
-console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server.my.host+":"+ server.my.port)
+console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server.my.host+":"+ server.my.port+":"+server['no_output'])
     stream = net.createConnection(server.peer.port, server.peer.host, {bind: server.my })   
     streamer(stream, function() {
       setTimeout(function() { client_connect(server, stream) }, 500)
-    })
+    }, server)
   }
   _(servers).each(function(server) { client_connect(server) })
 }
@@ -228,5 +235,5 @@ console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server
 packet_input()
 
 setInterval(function() { 
-  console.log("Status: i="+input_cnt+" o="+output_cnt)
-}, 1000)
+  sys.print("Status: i="+input_cnt+" o="+output_cnt+"\r")
+}, 10000)
