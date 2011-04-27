@@ -140,8 +140,8 @@ var packet_input = function() {
     packet.write(plen, 0, 'ascii');  
     if (output_streams.length > 0) {
       ++input_cnt;
-//console.log('send-plen='+len) 
       try {
+console.log('send-plen='+len) 
         output_streams[input_cnt%output_streams.length].write(packet.slice(0,len+4));
       } catch(e) {
         output_streams[input_cnt%output_streams.length].destroy();
@@ -153,7 +153,6 @@ var packet_input = function() {
 
 var output_cnt = 0;
 var streamer = function(stream, fn_closed, opts) {
-console.log('streamer:1');
   stream.setEncoding('binary');
   var connected = false;
   var wait_key_peer = true;
@@ -179,13 +178,12 @@ console.log('streamer:1');
     }
   }
   stream.on('connect', function() {
-console.log('client-connect:'+utils.inspect(opts));
+//console.log('client-connect:'+utils.inspect(opts));
 console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key.my+":"+opts['no_output']);
     if (!(opts['no_output'] && opts.no_output)) { output_streams.push(stream); }
     stream.write(key.my, 'utf-8');
     connected = true;
   })
-return;
   var clear_output_streams = function() {
 console.log('streamer:2');
     connected && console.log('client-close:'+stream.remoteAddress+":"+stream.remotePort);
@@ -233,6 +231,7 @@ console.log('streamer:2');
 }
 
 if (mode == 'server') {
+	console.log('SERVER-MODE');
   _(servers).each(function(server) { 
     console.log('LISTEN:'+server.peer.port+":"+server.peer.host);
     net.createServer(function(stream) {
@@ -272,9 +271,11 @@ console.log('found-data:'+data+":"+test)
 		queue.add(buf, state.len, state.completed, cmp);
   })
 } else {
+	console.log('CLIENT-MODE');
   var client_connect = function(server, stream) {
-console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server.my.host+":"+ server.my.port+":"+server['no_output'])
+		console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server.my.host+":"+ server.my.port+":"+server['no_output'])
     stream = net.createConnection(server.peer.port, server.peer.host, { bind: server.my });   
+		stream.setNoDelay(true);
     streamer(stream, function() {
       setTimeout(function() { client_connect(server, stream); }, 500);
     }, server)

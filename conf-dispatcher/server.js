@@ -6,9 +6,10 @@ var CouchClient = require('./couch-client');
 
 var callStreamie = function(token, fn) {
 	var streamie = http.request({
-					//host: 'streamie.org',
-					host: '172.29.29.222',
-                                        port: 8080,
+					host: 'streamie.org',
+					//host: '172.29.29.222',
+                                        //port: 8080,
+                                        port: 80,
                                         path: '/user_info',
 					method: 'GET',
                                         headers: {
@@ -19,7 +20,9 @@ var callStreamie = function(token, fn) {
 					res.setEncoding('utf8')
 					res.on('data', function(doc) {
 						try {
-							fn(JSON.parse(doc))
+							doc = JSON.parse(doc);
+							doc.statusCode = res.statusCode;
+							fn(doc);
 						} catch(e) {
 							console.error('callStreamie:exception:'+e)
 						}
@@ -55,7 +58,7 @@ var updateStreamie = function(mac, req, ret) {
              _id: ret.user_id, 
              twitter: ret,
              clients: [{
-                        ipv4: req.socket.remoteAddress,
+                        ipv4: req.headers['x-real-ip'] || req.socket.remoteAddress,
                         hwaddr: mac,
                         useragent: req.headers['user-agent'],
                         created_at: new Date()
@@ -66,7 +69,7 @@ var updateStreamie = function(mac, req, ret) {
       delete doc.completed
       for(var i = doc.clients.length-1; i >= 0; --i) {
         var clients = doc.clients[i]
-        if (clients.ipv4 == req.socket.remoteAddress) {
+        if (clients.ipv4 == req.headers['x-real-ip'] || req.socket.remoteAddress) {
           clients.hwaddr = mac
           clients.useragent = req.headers['user-agent']
           clients.created_at = new Date()
@@ -95,20 +98,20 @@ streamie.request('PUT', '/streamie', function(err, result) {
 	//	  res.setEncoding('utf-8')
 		  ret.oauth = dispatch.query['token']
 		  res.writeHead(ret.statusCode+'', {'Content-Type': 'application/javascript'});
-		  res.end(JSON.stringify(ret))
+		  callback = dispatch.query['callback'] || 'callback';
+		  res.end(callback + '(' + JSON.stringify(ret) + ')')
 		  if (ret.error) {
 			return;
 		  } 
-		  getMacAddress(req.socket.remoteAddress, function(mac) {
-        if (mac) { updateStreamie(mac, req, ret) }
+		  getMacAddress(req.headers['x-real-ip'] || req.socket.remoteAddress, function(mac) {
+		    if (mac) { updateStreamie(mac, req, ret) }
 		  }) 
-		
 		})
 		return;
 	  }
 	  res.writeHead(404, {'Content-Type': 'text/plain'});
 	  res.end('Weg hier \n');
-	}).listen(8124, "0.0.0.0");
+	}).listen(8124, "127.0.0.1");
 
   var updateIPTables = function(id) {
     streamie.get(id, function(err, doc) {
@@ -154,4 +157,4 @@ streamie.request('PUT', '/streamie', function(err, result) {
   })
 })
 
-console.log('Server running at http://0.0.0.0:8124/');
+console.log('Server running at http://127.0.0.1:8124/');
