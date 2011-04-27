@@ -69,7 +69,9 @@ Queue.prototype.add = function(obj, wait_len, found_fn, test) {
   }
   var segs = 0;
   var need = wait_len;
+console.log('ADD:'+utils.inspect(this.queue));
   for (var i = 0; i < this.queue.length; ++i) {
+
     var qe = this.queue[i];
     var diff = qe.data.length - qe.ofs;
     ++segs;
@@ -153,7 +155,7 @@ console.log('send-plen='+len)
 
 var output_cnt = 0;
 var streamer = function(stream, fn_closed, opts) {
-  stream.setEncoding('binary');
+  //stream.setEncoding('binary');
   var connected = false;
   var wait_key_peer = true;
   //var buffer = new Buffer(16*1024*1024)
@@ -185,7 +187,6 @@ console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key
     connected = true;
   })
   var clear_output_streams = function() {
-console.log('streamer:2');
     connected && console.log('client-close:'+stream.remoteAddress+":"+stream.remotePort);
     output_streams = _(output_streams).reject(function(s) { return s == stream; });
     connected && stream.destroy();
@@ -207,13 +208,14 @@ console.log('streamer:2');
   });
 
   stream.on('data', function(data) {
-//console.log('INPUT:'+JSON.stringify({})+":"+key.peer+":"+key.peer.length+":"+data.len+":"+typeof(data))    
-    var obj = { data: data, ofs: 0, len: data.length }
+    var obj = data;// { data: data, ofs: 0, len: data.length }
     if (wait_key_peer) {
+console.log('INPUT:KEY:'+obj.length+":"+key.peer.length);
       queue.add(obj, key.peer.length, function(in_key) {
+console.log('INPUT:KEY:'+in_key+":"+key.peer);
         if (in_key == key.peer) {
           console.log('verified key='+in_key);
-          stream.setEncoding('binary');
+          //stream.setEncoding('binary');
           wait_key_peer = false;
         } else {
           console.log('not verified key='+in_key);
@@ -222,6 +224,7 @@ console.log('streamer:2');
       })
       return;
     } 
+console.log('INPUT:'+JSON.stringify({})+":"+key.peer+":"+key.peer.length+":"+data.len+":"+typeof(data))    
     if (header.active) {
       queue.add(obj, header.len, header.completed);
     } else if (packet.active) { 
@@ -241,7 +244,7 @@ if (mode == 'server') {
   packet_input();
 } else if (mode == 'test') {
 	var streamer = function(stream, fn_closed, opts) {
-		stream.setEncoding('binary');
+		//stream.setEncoding('binary');
 		stream.on('connect', function() {
 console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort);
 			stream.destroy();
