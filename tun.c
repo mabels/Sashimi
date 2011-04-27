@@ -51,21 +51,21 @@ int main(int argc, char **argv) {
 	}
 	printf("allocated:%d:%s\n", fd, dev);
 	char setup[1024];
-	snprintf(setup, sizeof(setup), "./setup.%s \"%s\" \"%s\" \"%s\"", argv[2], argv[1], argv[2], dev);
+	snprintf(setup, sizeof(setup), "./setup.%s \"%s\" \"%s\" \"%s\"", argv[3], argv[2], argv[3], dev);
 	system(setup);
 
 	//seteuid(1000);	
 	char *cp_argv[argc+3];
-	cp_argv[0] = "node";
+	cp_argv[0] = argv[1];
 	cp_argv[1] = "sashimi.js";
 	char tun_fd[16];
 	snprintf(tun_fd, sizeof(tun_fd), "%s:%d", dev, fd);
 	cp_argv[2] = tun_fd;
 	int i;
-	for(i = 1; i <= argc;++i) {
-		cp_argv[i+2] = argv[i];
+	for(i = 2; i <= argc;++i) {
+		cp_argv[i+1] = argv[i];
 	} 
-	execvp("node", cp_argv);
+	execvp(argv[1], cp_argv);
 
 
 }

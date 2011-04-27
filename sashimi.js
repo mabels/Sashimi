@@ -125,6 +125,7 @@ for(var i = arg; i < process.argv.length; ++i) {
   else { srv.no_output = false; }
   servers.push(srv);
 }
+console.log('NODE:'+process.version);
 console.log('tun_dev='+tun_dev+' tun_fd='+tun_fd+" servers="+JSON.stringify(servers));
 
 var output_streams = [];
