@@ -152,6 +152,7 @@ var packet_input = function() {
 
 var output_cnt = 0;
 var streamer = function(stream, fn_closed, opts) {
+console.log('streamer:1');
   stream.setEncoding('binary');
   var connected = false;
   var wait_key_peer = true;
@@ -177,12 +178,15 @@ var streamer = function(stream, fn_closed, opts) {
     }
   }
   stream.on('connect', function() {
+console.log('client-connect:'+utils.inspect(opts));
 console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key.my+":"+opts['no_output']);
     if (!(opts['no_output'] && opts.no_output)) { output_streams.push(stream); }
     stream.write(key.my, 'utf-8');
     connected = true;
   })
+return;
   var clear_output_streams = function() {
+console.log('streamer:2');
     connected && console.log('client-close:'+stream.remoteAddress+":"+stream.remotePort);
     output_streams = _(output_streams).reject(function(s) { return s == stream; });
     connected && stream.destroy();
@@ -190,9 +194,18 @@ console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key
     fn_closed && fn_closed();
     fn_closed = false;
   }
-  stream.on('close', clear_output_streams);
-  stream.on('end', clear_output_streams);
-  stream.on('error', clear_output_streams);
+  stream.on('close', function() { 
+    console.log('streamer:close');
+    clear_output_streams();
+  });
+  stream.on('end', function() { 
+    console.log('streamer:end');
+    clear_output_streams();
+  });
+  stream.on('error', function() {
+    console.log('streamer:error'+utils.inspect(arguments));
+    clear_output_streams();
+  });
 
   stream.on('data', function(data) {
 //console.log('INPUT:'+JSON.stringify({})+":"+key.peer+":"+key.peer.length+":"+data.len+":"+typeof(data))    
@@ -217,11 +230,15 @@ console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key
     }
   });
 }
+
 if (mode == 'server') {
   _(servers).each(function(server) { 
-    net.createServer(streamer).listen(server.peer.port, server.peer.host) ;
+    console.log('LISTEN:'+server.peer.port+":"+server.peer.host);
+    net.createServer(function(stream) {
+			streamer(stream, null, server);
+		}).listen(server.peer.port, server.peer.host);
   })
-	packet_input();
+  packet_input();
 } else if (mode == 'test') {
 	var streamer = function(stream, fn_closed, opts) {
 		stream.setEncoding('binary');
@@ -262,7 +279,7 @@ console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server
     }, server)
   }
   _(servers).each(function(server) { client_connect(server); })
-	packet_input();
+  packet_input();
 }
 
 
