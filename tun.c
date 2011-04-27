@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdio.h>
 
+
+#include <netinet/in.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <linux/if_tun.h>
