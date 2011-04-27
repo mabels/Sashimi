@@ -69,7 +69,7 @@ Queue.prototype.add = function(obj, wait_len, found_fn, test) {
   }
   var segs = 0;
   var need = wait_len;
-console.log('ADD:'+utils.inspect(this.queue));
+//console.log('ADD:'+utils.inspect(this.queue));
   for (var i = 0; i < this.queue.length; ++i) {
 
     var qe = this.queue[i];
@@ -143,7 +143,7 @@ var packet_input = function() {
     if (output_streams.length > 0) {
       ++input_cnt;
       try {
-console.log('send-plen='+len) 
+//console.log('send-plen='+len) 
         output_streams[input_cnt%output_streams.length].write(packet.slice(0,len+4));
       } catch(e) {
         output_streams[input_cnt%output_streams.length].destroy();
@@ -210,9 +210,9 @@ console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key
   stream.on('data', function(data) {
     var obj = data;// { data: data, ofs: 0, len: data.length }
     if (wait_key_peer) {
-console.log('INPUT:KEY:'+obj.length+":"+key.peer.length);
+//console.log('INPUT:KEY:'+obj.length+":"+key.peer.length);
       queue.add(obj, key.peer.length, function(in_key) {
-console.log('INPUT:KEY:'+in_key+":"+key.peer);
+//console.log('INPUT:KEY:'+in_key+":"+key.peer);
         if (in_key == key.peer) {
           console.log('verified key='+in_key);
           //stream.setEncoding('binary');
@@ -224,7 +224,7 @@ console.log('INPUT:KEY:'+in_key+":"+key.peer);
       })
       return;
     } 
-console.log('INPUT:'+JSON.stringify({})+":"+key.peer+":"+key.peer.length+":"+data.len+":"+typeof(data))    
+//console.log('INPUT:'+JSON.stringify({})+":"+key.peer+":"+key.peer.length+":"+data.len+":"+typeof(data))    
     if (header.active) {
       queue.add(obj, header.len, header.completed);
     } else if (packet.active) { 
