@@ -115,6 +115,9 @@ crawler = function(base, completed, data) {
 	fs.readdir(base, function(err, in_files, dirs, cnt, i) {
 		if (err)  {
 			console.log('fs.readdir:err:'+err);
+			setTimeout(function() {
+			  crawler(data, completed, data);
+			}, 1000)
 		  return;
 		}
 		dirs = [];
