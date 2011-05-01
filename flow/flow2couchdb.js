@@ -4,84 +4,51 @@ var util = require('util');
 var http = require('http');
 var cp = require('child_process');
 var CouchClient = require('./couch-client');
-var _ = require('underscore')._;
-
 require('datejs');
 
-var Server = { host: '172.16.143.8', port: 9200, path: '/traffic', headers: { 'content-type': 'application/json' } };
 var Server = { host: '127.0.0.1', port: 5984, path: '/traffic', headers: { 'content-type': 'application/json' } };
-
-//flow-cat -t '3/14/11 9:31:00'  -T '3/14/11 9:32:00' -z9 2011 | flow-print
-var formatDate = function(date) {
-	return '"'+(date.getMonth()+1)+'/'+date.getDate()+'/'+date.getFullYear()+' '+date.getHours()+':'+date.getMinutes()+":"+date.getSeconds()+'"';
-}
-
-var getStartDate = function(done) {
-	fs.readFile('flow2couchdb.config', function(err, data) {
-		if (err) {
-			done();
-		} else {
-			try {
-				done(new Date(JSON.parse(data).startDate));
-			} catch(e) {
-				done();
-			}
-		}
-	})	
-}
-
-var setStartDate = function(date, done) {
-	fs.writeFile('flow2couchdb.config', JSON.stringify({ startDate: date }), done);
-}
 
 var gid = 1;
 var running = 0;
 var storeCouch = function(cmds, complete, id, cmd, i, found, count) {
-console.log('ENTER-storeCouch'+util.inspect(cmds));
+	console.log('ENTER-storeCouch'+util.inspect(cmds));
 	found = false;
 	for (i = running; i < 12; ++i) {
 		running = 12;
 		found = true;
-//console.log('QUEUE:'+i);
 		storeCouch(cmds, complete, id, cmd);
 	}
-	if (found) {
-		return
-	}
+	if (found) { return }
+
 	cmd = cmds.shift();
-	if (!cmd) {
-		return;
-	}
-console.log('START-storeCouch'+util.inspect(cmd));
-	//srcIP            dstIP            prot  srcPort  dstPort  octets      packets
+	if (!cmd) { return; }
+
+	console.log('START-storeCouch'+util.inspect(cmd));
 	id = ++gid;
 	count = 0;
 	var run = function() {
 		cp.exec(cmd.cmd.join(' '), { maxBuffer: 10*1024*1024 }, function(error, stdout, stderr, req, lines, out) {
-//console.log('WROTE:'+cmd.key);
 			if (error) {
-console.log('ERROR:'+id+":"+error+":"+cmd.cmd.join(' '));
-				if (count++ < 3) {
-					return run();
-				}
+				console.log('ERROR:'+id+":"+error+":"+cmd.cmd.join(' '));
+				if (count++ < 3) { return run(); }
 				running--;
-				storeCouch(cmds, complete)
+				storeCouch(cmds, complete);
 				return;
 			}
 			lines = stdout.split("\n");
-//console.log('LINES:'+util.inspect(lines));
 			delete stdout;
 			delete stderr;
 			lines.shift();
 			out = [];
 			var out = {
-				     _id: cmd.key,
-				     tuples: [],
-						 created_at: Date()
-				  };
+									 _id: cmd.key,
+									 tuples: [],
+									 created_at: Date()
+								};
 			for(var line in lines) {
 				line = lines[line];
-				var cols = line.split(/[ ]+/)
+				var cols = line.split(/[ ]+/);
+				//srcIP            dstIP            prot  srcPort  dstPort  octets      packets
 				if (cols.length >= 7) { 
 					out.tuples.push({
 						srcIP: ip2twitter[cols[0]] || cols[0],
@@ -91,10 +58,10 @@ console.log('ERROR:'+id+":"+error+":"+cmd.cmd.join(' '));
 						dstPort: cols[4],
 						octets: cols[5],
 						packets: cols[6]
-								});
+					});
 				}
 			}
-			if (!out.tuples.length) { 
+			var completed = function() {
 				delete lines;
 				delete cols;
 				delete data;
@@ -102,43 +69,39 @@ console.log('ERROR:'+id+":"+error+":"+cmd.cmd.join(' '));
 				running--;
 				storeCouch(cmds, complete)
 				if (!cmds.length) { console.log('storeCouch-COMPLETE'); complete(); }
-				return; 
 			}
-//console.log('OUT:'+util.inspect(out));
-      traffic.save(out, function(err, doc) {
-				delete lines;
-				delete cols;
-				delete data;
-				delete req;
-				running--;
-				storeCouch(cmds, complete)
-				if (!cmds.length) { console.log('storeCouch-COMPLETE'); complete(); }
-			})
+			if (!out.tuples.length) { 
+				completed();
+			} else {
+				traffic.save(out, function(err, doc) {
+					if (err) {
+						
+					}
+					completed();
+				})
+			}
 		})
 	}
 	run();
 }
 
 var ip2twitter = {};
-
 var lastStreamieChange = null;
 var streamie = new CouchClient('http://localhost:5984/streamie');
 streamie.changes(0, function(err, changes) {
 	if (err) {
-		console.error('couchdb:changes:failure:'+err)
-		return
+		console.error('couchdb:changes:failure:'+err);
+		return;
 	}
-	if (changes.deleted) { 
-		return 
-	}
+	if (changes.deleted) { return; }
 	streamie.get(changes.id, function(err, doc) {
 		if (err) {
-			console.error('couchdb:changes:failure:'+err)
-			return
+			console.error('couchdb:changes:failure:'+err);
+			return;
 		}
 		for (var i in doc.clients) { 
 			var client = doc.clients[i];
-console.log('ADD IP2Twitter:'+client.ipv4+"=>"+doc.twitter.screen_name);
+			console.log('ADD IP2Twitter:'+client.ipv4+"=>"+doc.twitter.screen_name);
 			ip2twitter[client.ipv4] = doc.twitter.screen_name;
 		} 
 		lastStreamieChange = new Date();
@@ -148,8 +111,7 @@ console.log('ADD IP2Twitter:'+client.ipv4+"=>"+doc.twitter.screen_name);
 crawler = function(base, completed, data) {
 	data = data || { dirs: [], files: [], calls: 0 };
 	data.calls++;
-console.log('IN-CRAWLER:'+base+":"+data.calls);
-
+	console.log('IN-CRAWLER:'+base+":"+data.calls);
 	fs.readdir(base, function(err, in_files, dirs, cnt, i) {
 		if (err)  {
 			console.log('fs.readdir:err:'+err);
@@ -172,8 +134,7 @@ console.log('IN-CRAWLER:'+base+":"+data.calls);
 							crawler(dirs[dir], completed, data);
 						}
 						data.calls--;
-console.log('OUT-CRAWLER-A:'+base+":"+data.calls);
-//console.log('DATA:'+util.inspect(data));
+						console.log('OUT-CRAWLER-A:'+base+":"+data.calls);
 						if (!data.calls) {
 							completed(data);
 						}
@@ -183,7 +144,7 @@ console.log('OUT-CRAWLER-A:'+base+":"+data.calls);
 		}
 		if (!in_files.length) {
 			data.calls--;
-console.log('OUT-CRAWLER-B:'+base+":"+data.calls);
+			console.log('OUT-CRAWLER-B:'+base+":"+data.calls);
 			if (!data.calls) {
 				completed(data);
 			}
@@ -252,10 +213,4 @@ console.log('ADD-Flow:'+file);
 		setTimeout(CheckChanges, 1000);
 	}
 }, 1000);
-
-
-
-
-//console.log("MENO"+Date.parseExact("2011-04-10", "yyyy-M-d"))
-//console.log("MENO"+Date.parseExact("2011-04-10.174750", "yyyy-M-d.HHmmss"))
 

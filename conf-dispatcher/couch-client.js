@@ -1,10 +1,9 @@
 /*global Buffer */
 
-var Http = require('http'),
-    Url = require('url'),
-    EventEmitter = require('events').EventEmitter,
-    querystring = require('querystring');
-
+var Http = require('http');
+var Url = require('url');
+var EventEmitter = require('events').EventEmitter;
+var querystring = require('querystring');
 
 var POOL_SIZE = 200; // Maximum number of concurrent connections allowed.
 var MAX_DOCS = 1000; // The maximum number of docs to send in a single batch

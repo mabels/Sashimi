@@ -1,9 +1,9 @@
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <string.h>
 #include <stdio.h>
-
 
 #include <netinet/in.h>
 #include <net/if.h>
@@ -16,30 +16,27 @@ int tun_alloc(char *dev)
 	struct ifreq ifr;
 	int fd, err;
 
-	if( (fd = open("/dev/net/tun", O_RDWR)) < 0 )
+	if( (fd = open("/dev/net/tun", O_RDWR)) < 0 ) {
 	 return -1;
-
+	}
 	memset(&ifr, 0, sizeof(ifr));
-
 	/* Flags: IFF_TUN   - TUN device (no Ethernet headers) 
 	 *        IFF_TAP   - TAP device  
 	 *
 	 *        IFF_NO_PI - Do not provide packet information  
 	 */ 
 	ifr.ifr_flags = IFF_TUN; 
-	if( *dev )
+	if (*dev) {
 	 strncpy(ifr.ifr_name, dev, IFNAMSIZ);
-
+	}
 	err = ioctl(fd, TUNSETIFF, &ifr);
-
-	if( err < 0 ){
+	if (err < 0) {
 	 close(fd);
 	 return err;
 	}
 	strcpy(dev, ifr.ifr_name);
 	return fd;
 }              
- 
 
 int main(int argc, char **argv) {
 	char dev[100];
@@ -54,7 +51,7 @@ int main(int argc, char **argv) {
 	snprintf(setup, sizeof(setup), "./setup.%s \"%s\" \"%s\" \"%s\"", argv[3], argv[2], argv[3], dev);
 	system(setup);
 
-	seteuid(1000);	
+	seteuid(1000); // UGLY BUT USEFUL The node has to by run as root!!
 	char *cp_argv[argc+3];
 	cp_argv[0] = argv[1];
 	cp_argv[1] = "sashimi.js";
@@ -66,6 +63,4 @@ int main(int argc, char **argv) {
 		cp_argv[i+1] = argv[i];
 	} 
 	execvp(argv[1], cp_argv);
-
-
 }
