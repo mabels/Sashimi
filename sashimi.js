@@ -66,9 +66,9 @@ var packet_input = function() {
     if (output_streams.length > 0) {
       ++status.in;
       try {
-        output_streams[input_cnt%output_streams.length].write(packet.slice(0, len+4));
+        output_streams[status.in%output_streams.length].write(packet.slice(0, len+4));
       } catch(e) {
-        output_streams[input_cnt%output_streams.length].destroy();
+        output_streams[status.in%output_streams.length].destroy();
       }
     }
     packet_input();
@@ -180,4 +180,4 @@ if (mode == 'server') {
   packet_input();
 }
 
-setInterval(function() { sys.print("Status:"+util.inspect(status)); }, 10000);
+setInterval(function() { sys.print("Status:"+utils.inspect(status)); }, 10000);
