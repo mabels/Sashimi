@@ -52,13 +52,33 @@ for(var i = arg; i < process.argv.length; ++i) {
 console.log('node_version:'+process.version+' tun_dev='+tun_dev+' tun_fd='+tun_fd+" servers="+JSON.stringify(servers));
 
 var output_streams = [];
-var status = { in: 0, out: 0 };
+var status = { in: 0, 
+               out: 0, 
+               pingId: 0;
+               connections: { 
+                              open: 0,
+                              client: {
+                                connects: 0 
+                              },
+                              server: {
+                                connects: 0
+                                close: 0
+                              }
+                            }, 
+               tun: {
+                      input: {
+                               err: 0
+                             }
+                    },
+               failure: { write: 0 }  };
 var packet_input = function() {
   var packet = new Buffer(1600); 
   /* tun has a 4byte header i currently not know what this means */
   fs.read(tun_fd, packet, 4, packet.length-4, null, function(err, len) {
     if (err) { 
+      status.tun.input.err++;
 			console.log('packet_input err:'+err); 
+      packet_input();
 			return; 
 		}
     var plen = (((len) + 10000)+'').slice(1); // leading zero's
@@ -89,6 +109,7 @@ var streamer = function(stream, fn_closed, opts) {
 					packet.active = true;
 					packet.len = ~~data;
 					queue.add(null, packet.len, packet.completed);
+          return null
 				}
   }
   var packet = { 
@@ -96,11 +117,32 @@ var streamer = function(stream, fn_closed, opts) {
 			len: 0, 
 			completed: function(data, test) {
 				++status.out;
-        fs.write(tun_fd, data, 0, data.length);
+        var writeTun = null
+        if (data.length == 8) {
+          var str = data.toString("ascii")
+          { 
+            PING: function(id) {
+              writeTun = "PONG"+str.slice(4,8);  
+            },
+            PONG: function(id) {
+              for(var i = output_stream.length-1; i >= 0; --i) {
+                for(var j = output_stream[i].waitPingIds.length - 1; j >= 0; --j) {
+                  if (output_stream[i].waitPingIds[j] == id) {
+                    delete output_stream[i].waitPingIds[j]  
+                    break
+                  }
+                }
+              }
+              writeTun = false //ugly
+            }
+          }[str.slice(0,4)](str.slice(4,8));
+        } 
+        (writeTun === null) && fs.write(tun_fd, data, 0, data.length);
         header.active = true;
         packet.active = false;
         packet.len = 0;
         queue.add(null, header.len, header.completed);
+        return writeTun
     	}
   }
   stream.on('connect', function() {
@@ -112,10 +154,11 @@ var streamer = function(stream, fn_closed, opts) {
   var clear_output_streams = function() {
     connected && console.log('client-close:'+stream.remoteAddress+":"+stream.remotePort);
 		var tmp = [];
-		for(var i in output_streams) {
+		for(var i = output_streams.length - 1; i >= 0;  --i) {
 			var s = output_streams[i];
 			s !== stream && tmp.push(s);
 		}
+    status.connections.server.close++;
 		output_streams = tmp;
     connected && stream.destroy();
     connected = false;
@@ -152,7 +195,10 @@ var streamer = function(stream, fn_closed, opts) {
     if (header.active) {
       queue.add(obj, header.len, header.completed);
     } else if (packet.active) { 
-      queue.add(obj, packet.len, packet.completed);
+      queue.add(obj, packet.len, function(data, test ) { 
+        var output = packet.completed(data, test);
+        output && stream.write(output, "utf-8");
+      }
     }
   });
 }
@@ -166,12 +212,42 @@ if (mode == 'server') {
 		}).listen(server.peer.port, server.peer.host);
   })
   packet_input();
+  var packet = new Buffer(16); 
+  var running = function() {
+    for(var i = output_stream.length-1; i >= 0; --i) {
+      var plen = (((8) + 10000)+'').slice(1); // leading zero's
+      packet.write(plen, 0, 'ascii');  
+      if (!output_streams[i].waitPingIds) { output_streams[i].waitPingIds = [] }
+      var id = (((status.pingId++)%10000)+10000).slice(1)
+      output_streams[i].waitPingIds.push({ id: id, date: (new Date()).getTime()) });
+      var pingId = "PING"+id
+      packet.write(pingId, 4, 'ascii');
+      output_streams[i].write(pingId);
+      if (output_stream[i].waitPingIds) {
+        var now = (new Date()).getTime();
+        for(var j = output_stream[i].waitPingIds.length - 1; j >= 0; --j) {
+          var ping = output_stream[i].waitPingIds[j]
+          if (ping.id == id) {
+            delete output_stream[i].waitPingIds[j]  
+            break
+          }
+          if ((now-ping.date) >= 5000) {
+            // CLOSE Stream
+            output_streams[i].destroy();
+          }
+        }
+      }
+    }
+    setTimeout(running, 500);
+  }
+  setTimeout(running, 500);
 } else if (mode == 'client') {
 	console.log('CLIENT-MODE');
   var client_connect = function(server, stream) {
 		console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server.my.host+":"+ server.my.port+":"+server['no_output'])
     stream = net.createConnection(server.peer.port, server.peer.host, { bind: server.my });   
 		stream.setNoDelay(true);
+    status.connections.clients.connects++;
     streamer(stream, function() {
       setTimeout(function() { client_connect(server, stream); }, 1000);
     }, server); // reconnect
@@ -180,4 +256,7 @@ if (mode == 'server') {
   packet_input();
 }
 
-setInterval(function() { sys.print("Status:"+utils.inspect(status)); }, 10000);
+setInterval(function() { 
+  status.connections.open = output_streams.length; 
+  sys.print("Status:"+utils.inspect(status)); 
+}, 10000);
