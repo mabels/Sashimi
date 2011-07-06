@@ -98,7 +98,6 @@ var packet_input = function() {
 }
 
 var streamer = function(stream, fns, opts) {
-  stream.setNoDelay(true);
   //stream.setEncoding()
   var connected = false;
   var wait_key_peer = true;
@@ -158,6 +157,7 @@ var streamer = function(stream, fns, opts) {
       }
   }
   stream.on('connect', function() {
+    stream.setNoDelay(true);
     console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key.my+":"+opts['no_output']);
     stream.write(key.my, 'utf-8');
     connected = true;
@@ -269,7 +269,6 @@ if (mode == 'server') {
   var client_connect = function(server, stream) {
     console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server.my.host+":"+ server.my.port+":"+server['no_output'])
     stream = net.createConnection(server.peer.port, server.peer.host, { bind: server.my });   
-    stream.setNoDelay(true);
     status.connections.client.connects++;
     streamer(stream, {
       closed: function() {
@@ -299,6 +298,13 @@ if (mode == 'server') {
     setTimeout(recvPing, 1000);
   }, 1000);
 }
+
+var http = require('http');
+http.createServer(function (req, res) {
+  res.writeHead(200, {'Content-Type': 'application/json'});
+  status.connections.open = output_streams.length; 
+  res.end(JSON.stringify(status))
+}).listen(1706, "0.0.0.0");
 
 setInterval(function() { 
   status.connections.open = output_streams.length; 
