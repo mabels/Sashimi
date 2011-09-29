@@ -19,9 +19,13 @@ var callStreamie = function(token, fn) {
 				  }
 		}, function(res) { 
 					res.setEncoding('utf8')
+          var data = [];
 					res.on('data', function(doc) {
+            data.push(data.toString("utf-8"));
+          })
+					res.on('end', function(doc) {
 						try {
-							doc = JSON.parse(doc);
+							doc = JSON.parse(data.join(""));
 							doc.statusCode = res.statusCode;
 							fn(doc);
 						} catch(e) {
