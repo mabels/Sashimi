@@ -6,6 +6,7 @@ var fs   = require('fs');
 var CouchClient = require('./couch-client');
 
 var debug = process.argv[2] == 'debug';
+var production = !(process.argv[3] == 'test');
 
 var listen = { host: "127.0.0.1", port: 8124 };
 
@@ -134,11 +135,16 @@ streamie.request('PUT', '/streamie', function(err, result) {
 				fn(0);
 				return;
 		}
-		var iptables  = require('child_process').spawn('sudo', ['/sbin/iptables'].concat(para))
-		iptables.on('exit', function(code) {
-			~~code && console.log('iptables:'+para.join(' ')+"=>"+code);
-			fn(code);
-		});
+    if (production) {
+      var iptables  = require('child_process').spawn('sudo', ['/sbin/iptables'].concat(para))
+      iptables.on('exit', function(code) {
+        ~~code && console.log('iptables:'+para.join(' ')+"=>"+code);
+        fn(code);
+      });
+    } else {
+        console.log('iptables:'+para.join(' ')+"=>"+code);
+        fn(code);
+    }
 	};
 
 	var writeIPTables = function(para, fn, cmds, codes) {
