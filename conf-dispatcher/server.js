@@ -5,6 +5,8 @@ var fs   = require('fs');
 
 var CouchClient = require('./couch-client');
 
+var debug = process.argv[2] == 'debug';
+
 var listen = { host: "127.0.0.1", port: 8124 };
 
 var callStreamie = function(token, fn) {
@@ -89,6 +91,7 @@ var updateStreamie = function(mac, req, ret, retryCnt) {
 				doc.clients.push(client);
 			}
     }
+		/*
     streamie.save(doc, function(err, doc) {
 			if (err) { 
 				// retry raise condition
@@ -100,10 +103,11 @@ var updateStreamie = function(mac, req, ret, retryCnt) {
 				}
 			}
     });
+		*/
   });
 }
 
-var streamie = CouchClient('http://localhost:5984/streamie');
+var streamie = CouchClient('http://127.0.0.1:5984/streamie');
 streamie.request('PUT', '/streamie', function(err, result) {
 	http.createServer(function (req, res) {
 	  var dispatch = url.parse(req.url, true);
@@ -125,6 +129,11 @@ streamie.request('PUT', '/streamie', function(err, result) {
 	}).listen(listen.port, listen.host);
 
 	var iptables = function(para, fn) {
+		if (debug) {
+				console.log('iptables:'+para.join(' '));
+				fn(0);
+				return;
+		}
 		var iptables  = require('child_process').spawn('sudo', ['/sbin/iptables'].concat(para))
 		iptables.on('exit', function(code) {
 			~~code && console.log('iptables:'+para.join(' ')+"=>"+code);
@@ -147,7 +156,8 @@ streamie.request('PUT', '/streamie', function(err, result) {
   var updateIPTables = function(doc, cmds, retryCnt) {
 		retryCnt = retryCnt || 0;
 		cmds = ['-D', '-I'];
-		if (doc._rev != rev) { return; }
+//console.log('DOC:'+util.inspect(doc));
+//		if (doc._rev != rev) { return; }
 		if (doc.completed && doc.completed.pid == process.pid) { return; }
 		var called = 0;
 		for(var i = doc.clients.length-1; i >= 0; --i) {
@@ -184,32 +194,40 @@ streamie.request('PUT', '/streamie', function(err, result) {
 	iptables(['-t', 'mangle', '-F', 'FREE_MACS'], function(code) {
 		iptables(['-t', 'mangle', '-A', 'FREE_MACS', '-j', 'RETURN'], function(code) {
 			var docrevs = {};
-			streamie.all(function(err, doc) {
-				if (err) {
-					console.log('ERROR:streamie:all:'+err);
-					return;
-				}
-				docrevs[doc._id] = doc.rev;
-				updateIPTables(doc);
-			});
-			streamie.changes(-1, function(err, changes) {
+			streamie.changes(0, function(err, changes) {
 					if (err) {
 						console.error('ERROR:couchdb:changes:'+err);
 						return;
 					}
 					if (changes.deleted) { 
-    				streamie.request('GET', '/streamie/'+changes.id+'?rev='+changes.rev, function(err, doc) {
+return;
+    				streamie.request('GET', '/streamie/'+changes.id+'?rev='+changes.changes[0].rev, function(err, doc) {
+							if (err) {
+								console.log('ERROR:couchdb:get:'+err);
+								return;
+							}
+							if (doc.blocked) {
+								console.log('BLOCKED:'+doc._id);
+								return;	
+							} 
+console.log('DELETE:'+util.inspect(doc));
 							updateIPTables(doc, ['-D']);
 						})
 					}
 					for(var i in changes.changes) {
-						if (docrevs[changes.id] != changes.changes.rev) {
+						if (docrevs[changes.id] != changes.changes[i].rev) {
+console.log('CHANGES:'+i+":"+util.inspect(changes.id));
 							streamie.get(changes.id, function(err, doc) {
 								if (err) {
-	
+									console.log('ERROR:couchdb:get:'+changes.id+":"+err);
 									return;
 								}
+								if (doc.blocked) {
+									console.log('BLOCKED:'+doc.id);
+									return;	
+								} 
 								docrevs[doc._id] = doc._rev;
+//console.log('CHANGES:'+util.inspect(doc));
 								updateIPTables(doc);
 							})
 						}
