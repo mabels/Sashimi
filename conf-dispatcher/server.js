@@ -1,4 +1,5 @@
 var http = require('http');
+var https = require('https');
 var url  = require('url');
 var util = require('util');
 var fs   = require('fs');
@@ -6,7 +7,6 @@ var fs   = require('fs');
 var CouchClient = require('./couch-client');
 
 var debug = process.argv[2] == 'debug';
-var production = !(process.argv[3] == 'test');
 
 var listen = { host: "127.0.0.1", port: 8124 };
 
@@ -24,11 +24,11 @@ var callStreamie = function(token, fn) {
 					res.setEncoding('utf8')
           var data = [];
 					res.on('data', function(doc) {
-            data.push(data.toString("utf-8"));
+            data.push(doc.toString("utf-8"));
           })
-					res.on('end', function(doc) {
+					res.on('end', function() {
 						try {
-							doc = JSON.parse(data.join(""));
+							var doc = JSON.parse(data.join(""));
 							doc.statusCode = res.statusCode;
 							fn(doc);
 						} catch(e) {
@@ -37,6 +37,65 @@ var callStreamie = function(token, fn) {
 					}) 
 	}).end();
 }
+
+var TwitterCBQueue = {};
+var updateTwitterDetails = function(doc, fn) {
+  if (!(!doc.twitter.details || doc.twitter.details.error)) {
+		fn(doc);
+	  return;
+  }
+	var name = doc.twitter.screen_name;
+	if(TwitterCBQueue[name]) {
+		TwitterCBQueue[name].push({
+			doc: doc,
+			fn: fn
+		});
+		return;
+	} else {
+		TwitterCBQueue[name] = [{
+			doc: doc,
+			fn: fn
+		}];
+	}
+	var token = doc.twitter.oauth;
+	console.log('Fetching twitter details for ' + name)
+	var streamie = http.request({
+					host: 'streamie.org',
+					port: 80,
+					path: '/twitter/1/users/show.json?screen_name='+encodeURIComponent(name)+'&_token='+encodeURIComponent(token),
+					method: 'GET',
+					headers: {
+						'Host': 'streamie.org',
+						'Cookie': 'token='+token			 
+					}
+		},  function(res) { 
+					res.setEncoding('utf8');
+					var str;
+					var data = [];
+					res.on('data', function(str) {
+						data.push(str.toString("utf-8"));
+					})
+					res.on('end', function() {
+						try {
+							str = data.join("");
+							console.log(str);
+							var details = JSON.parse(str);
+							details.statusCode = res.statusCode;
+							details._fetchTime = new Date;
+						} catch(e) {
+							console.error('updateTwitterDetails:exception:'+e+'\n'+str);
+						}
+						TwitterCBQueue[name].forEach(function(cb) {
+							var doc = cb.doc;
+							var fn  = cb.fn;
+							doc.twitter.details = details;
+							fn(doc);
+						});
+						TwitterCBQueue[name] = null;
+					}) 
+	}).end();
+}
+
 
 var getMacAddress = function(address, fn) {
   fs.readFile('/proc/net/arp', 'utf8', function(err, data) {
@@ -92,7 +151,6 @@ var updateStreamie = function(mac, req, ret, retryCnt) {
 				doc.clients.push(client);
 			}
     }
-		/*
     streamie.save(doc, function(err, doc) {
 			if (err) { 
 				// retry raise condition
@@ -104,7 +162,6 @@ var updateStreamie = function(mac, req, ret, retryCnt) {
 				}
 			}
     });
-		*/
   });
 }
 
@@ -129,28 +186,51 @@ streamie.request('PUT', '/streamie', function(err, result) {
 	  res.end("Weg hier\n");
 	}).listen(listen.port, listen.host);
 
+
+	var iptablesQueue = [];
+	var iptablesRunning = false;
+  var SerializeIptables = function() {
+		if (iptablesRunning) { return; } 
+		iptablesRunning = true;
+		var run = function(current) {
+			current = iptablesQueue.shift();
+			if (!current) { 
+				iptablesRunning = false;
+				return;
+			}
+			var iptables  = require('child_process').spawn('sudo', ['/sbin/iptables'].concat(current.para))
+			iptables.on('exit', function(code) {
+				console.log('iptables:'+current.para.join(' ')+"=>"+code);
+				current.fn(code);
+				run();
+			});
+		}
+		run();
+  }
+
+	
 	var iptables = function(para, fn) {
+//console.log(para);
 		if (debug) {
-				console.log('iptables:'+para.join(' '));
+				console.log('debug-iptables:'+para.join(' '));
 				fn(0);
 				return;
 		}
-    if (production) {
-      var iptables  = require('child_process').spawn('sudo', ['/sbin/iptables'].concat(para))
-      iptables.on('exit', function(code) {
-        ~~code && console.log('iptables:'+para.join(' ')+"=>"+code);
-        fn(code);
-      });
-    } else {
-        console.log('iptables:'+para.join(' ')+"=>"+code);
-        fn(code);
-    }
+		iptablesQueue.push({para:para, fn: fn});
+		SerializeIptables();
+/*
+		var iptables  = require('child_process').spawn('sudo', ['/sbin/iptables'].concat(para))
+		iptables.on('exit', function(code) {
+			~~code && console.log('iptables:'+para.join(' ')+"=>"+code);
+			fn(code);
+		});
+*/
 	};
 
-	var writeIPTables = function(para, fn, cmds, codes) {
+	var writeIPTables = function(para, fn, cmds, codes, cmd) {
 		cmds = cmds || ['-D', '-I'];
 		codes = codes || [];
-		var cmd = cmds.shift();
+		cmd = cmds.shift();
 		if (!cmd) { return true; }
 		iptables([cmd].concat(para), function(code) {
 			codes.push(code);
@@ -159,42 +239,50 @@ streamie.request('PUT', '/streamie', function(err, result) {
 		return false;
 	}
 
-  var updateIPTables = function(doc, cmds, retryCnt) {
+  var updateIPTables = function(doc, cmds, retryCnt, client, called, i) {
 		retryCnt = retryCnt || 0;
-		cmds = ['-D', '-I'];
 //console.log('DOC:'+util.inspect(doc));
 //		if (doc._rev != rev) { return; }
 		if (doc.completed && doc.completed.pid == process.pid) { return; }
-		var called = 0;
-		for(var i = doc.clients.length-1; i >= 0; --i) {
-			var client = doc.clients[i];
+		called = 0;
+		for(i = doc.clients.length-1; i >= 0; --i) {
+			client = doc.clients[i];
 			// $IPTABLES -t mangle -I FREE_MACS -i $CONF_IF -p all -m mac 
 			// --mac-source c8:bc:c8:4f:d4:66 -s 10.205.0.100 -j MARK --set-mark 0x1205
-			var iptable = [];
-			iptable.push('FREE_MACS');
-			iptable.push('-t', 'mangle');
-			iptable.push('-p', 'all');
-			iptable.push('-m', 'mac');
-			iptable.push('--mac-source', client.hwaddr);
-			iptable.push('-s', client.ipv4);
-			iptable.push('-j', 'MARK');
-			iptable.push('--set-mark', '0x1205');
-			writeIPTables(iptable, function(codes) {
-				client.iptabled = { date: new Date(), exitcodes: codes, rev: doc._rev };
-				if (called++ == doc.clients.length) {
-					doc.completed = { date: new Date(), pid: process.pid, rev: doc._rev };
-					streamie.save(doc, function(err, doc) {
-						if (err) {
-							if (retryCnt < 5) { 
-								console.error('updateIPTables:couchdb:save:failure:'+err+":"+retryCnt);
-								setTimeout(function() { updateIPTables(id, rev, retryCnt + 1); }, 500);
-							} else {
-								console.error('updateIPTables:couchdb:save:failure:'+err+":MAX-RETRIED");
+			(function(client, iptable, cmds) {
+				cmds = ['-D', '-I'];
+				iptable = [];
+				iptable.push('FREE_MACS');
+				iptable.push('-t', 'mangle');
+				iptable.push('-p', 'all');
+				iptable.push('-m', 'mac');
+				iptable.push('--mac-source', client.hwaddr);
+				iptable.push('-s', client.ipv4);
+				iptable.push('-j', 'MARK');
+				iptable.push('--set-mark', '0x1205');
+				console.log('Saving', iptable);
+				writeIPTables(iptable, function(codes) {
+					console.log('writeIPTables CB', client, codes);
+					client.iptabled = { date: new Date(), exitcodes: codes, rev: doc._rev };
+					if (++called == doc.clients.length) {
+						console.log('Called == doc.clients.length')
+						doc.completed = { date: new Date(), pid: process.pid, rev: doc._rev };
+						streamie.save(doc, function(err, doc) {
+							if (err) {
+								if (retryCnt < 5) { 
+									console.error('updateIPTables:couchdb:save:failure:'+err+":"+retryCnt);
+									setTimeout(function() { updateIPTables(id, rev, retryCnt + 1); }, 500);
+								} else {
+									console.error('updateIPTables:couchdb:save:failure:'+err+":MAX-RETRIED");
+								}
 							}
-						} 
-					})
-				}
-			}, cmds);
+							console.log('Saved'); //console.dir(doc);
+						})
+					} else {
+						console.log(called, doc.clients.length)
+					}
+				}, cmds);
+			})(client);
 		}
   }
 	iptables(['-t', 'mangle', '-F', 'FREE_MACS'], function(code) {
@@ -234,13 +322,14 @@ console.log('CHANGES:'+i+":"+util.inspect(changes.id));
 								} 
 								docrevs[doc._id] = doc._rev;
 //console.log('CHANGES:'+util.inspect(doc));
-								updateIPTables(doc);
+                updateTwitterDetails(doc, updateIPTables);
 							})
 						}
 					}
 			})
 		})
-	})
+  })
 })
 
+console.log("HALLO");
 console.log('Server running at http://'+listen.host+":"+listen.port+'/');

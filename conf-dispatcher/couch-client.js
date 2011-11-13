@@ -150,7 +150,7 @@ function CouchClient(url) {
           });
           return;
         }
-console.log("*****"+require('util').inspect(results));
+//console.log("*****"+require('util').inspect(results));
         results.forEach(function (result, i) {
           var doc = body[i];
           doc._id = result.id;
@@ -247,29 +247,50 @@ debugger;
     save(doc, callback);
   }
 
-  function changes(since, callback) {
-    var stream = request("GET", uri.pathname + "/_changes?feed=continuous&heartbeat=1000&since=" + since);
-    var data = "";
-    function checkData() {
-      var p = data.indexOf("\n");
-      if (p >= 0) {
-        var line = data.substr(0, p).trim();
-        data = data.substr(p + 1);
-        if (line.length) {
-          callback(null, JSON.parse(line));
-        }
-        checkData();
-      }
-    }
-    stream.on('error', callback);
-    stream.on('data', function (chunk) {
-      data += chunk;
-      checkData();
-    });
-    stream.on('end', function () {
-      throw new Error("Changes feed got broken!");
-    });
-  }
+  function changes(since, callback, opts) {
+		opts = opts || { 
+										feed: "continuous",
+										heartbeat: "1000",
+										since: since
+									 }
+		var changer = {
+			changes_: function(since, callback, opts) {
+				var stream = request("GET", uri.pathname + "/_changes?since=" + since);
+				var data = []
+				stream.on('error', callback);
+				stream.on('data', function (chunk) {
+					data.push(chunk.toString("utf-8"));
+				});
+				stream.on('end', function () {
+					callback(null, JSON.parse(data.join("")));
+				});
+			},
+			changes_continuous: function(since, callback, opts) {
+				var stream = request("GET", uri.pathname + "/_changes?feed=continuous&heartbeat=1000&since=" + since);
+				var data = "";
+				function checkData() {
+					var p = data.indexOf("\n");
+					if (p >= 0) {
+						var line = data.substr(0, p).trim();
+						data = data.substr(p + 1);
+						if (line.length) {
+							callback(null, JSON.parse(line));
+						}
+						checkData();
+					}
+				}
+				stream.on('error', callback);
+				stream.on('data', function (chunk) {
+					data += chunk;
+					checkData();
+				});
+				stream.on('end', function () {
+					throw new Error("Changes feed got broken!");
+				});
+			}
+		}
+		return changer["changes_"+opts.feed].apply(this, [since, callback, opts]);
+	}
 
   function view(viewName, obj, callback) {
 	var method = "GET";

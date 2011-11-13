@@ -3,6 +3,11 @@ var utils = require('util');
 var fs = require('fs');
 var net = require('net');
 var Queue = require('./queue');
+var http = require('http');
+
+http.globalAgent.maxSockets = 20
+
+//console.log(http.globalAgent)
 
 var split_host_port = function(str) {
   var ret = str.split(':');
@@ -34,6 +39,7 @@ var tun_fd  = split_host_port(process.argv[arg++]).port;
 var mode = process.argv[arg++];
 var name = process.argv[arg++];
 
+
 var key = {
              my:   process.argv[arg++],
              peer: process.argv[arg++]
@@ -49,7 +55,7 @@ for(var i = arg; i < process.argv.length; ++i) {
   else { srv.no_output = false; }
   servers.push(srv);
 }
-console.log('node_version:'+process.version+' tun_dev='+tun_dev+' tun_fd='+tun_fd+" servers="+JSON.stringify(servers));
+console.log('node_version:'+process.version+' mode='+mode+' tun_dev='+tun_dev+' tun_fd='+tun_fd+" servers="+JSON.stringify(servers));
 
 var output_streams = [];
 var status = { in: 0, 
@@ -62,37 +68,46 @@ var status = { in: 0,
                               },
                               server: {
                                 connects: 0,
-                                close: 0
+                                timeout: 0,
+                                close: 0,
+                                req: 0
                               }
                             }, 
                tun: {
+                      queue: {
+                               max: 0,
+                               timeout: 0
+                      },
                       input: {
                                err: 0
                              }
                     },
                failure: { write: 0 }  };
 
+
+var output_packets = []
+var output_packets_max_length = 100;
 var packet_input = function() {
   var packet = new Buffer(1600); 
   /* tun has a 4byte header i currently not know what this means */
-  fs.read(tun_fd, packet, 4, packet.length-4, null, function(err, len) {
+  ofs = 0 // macos
+  fs.read(tun_fd, packet, ofs, packet.length-ofs, null, function(err, len) {
     if (err) { 
       status.tun.input.err++;
-      console.log('packet_input err:'+err); 
+      console.log('packet_input err:'+tun_fd+":"+err); 
       packet_input();
       return; 
     }
-    var plen = (((len) + 10000)+'').slice(1); // leading zero's
-    packet.write(plen, 0, 'ascii');  
-    if (output_streams.length > 0) {
-      ++status.in;
-      try {
-        output_streams[status.in%output_streams.length].write(packet.slice(0, len+4));
-      } catch(e) {
-//console.log("packet_input:DESTROY")
-        output_streams[status.in%output_streams.length].destroy();
-      }
+    if (output_packets.length > output_packets_max_length) {
+      status.tun.queue.max++;
+      console.log('packet_input err:queue_len '+output_packets_max_length); 
+      packet_input();
+      return; 
     }
+//console.log("READ-TUN:", len, packet);
+    output_packets.push({packet: packet, len: len, now: Date.now()});
+    ++status.in;
+    sender();
     packet_input();
   })
 }
@@ -159,7 +174,7 @@ var streamer = function(stream, fns, opts) {
   stream.on('connect', function() {
     stream.setNoDelay(true);
     console.log('client-connect:'+stream.remoteAddress+":"+stream.remotePort+":"+key.my+":"+opts['no_output']);
-    stream.write(key.my, 'utf-8');
+    stream.write(key.my, 'utf8');
     connected = true;
   })
   var clear_output_streams = function() {
@@ -253,58 +268,215 @@ console.log("PING DESTROY");
   }
 }
 
+var build_packet = function(packets) {
+        var len = 0;
+        for(var i = 0, l = packets.length; i < l; ++i) {
+//console.log("I:",i,packets[i].len);
+          len += packets[i].len + 4; 
+        }
+        var buf = new Buffer(len);
+        var ofs = 0;
+        for(var i = 0, l = packets.length; i < l; ++i) {
+          var packet = packets[i];
+          var plen = (packet.len+10000+'').slice(1); // leading zero's
+//console.log("LEN:",packet.len, plen);
+          buf.write(plen, 0, 'ascii') 
+          ofs += 4
+          packet.packet.copy(buf, ofs, 0, packet.len);
+          ofs += packet.len
+        }
+        return buf;
+}
+
+server_reqs = []; 
+server_max_reqs = 10;
+var server_sender = function() {
+  console.log("sender:"+server_reqs.length+":"+output_packets.length);
+
+  while (server_reqs.length > 0 && output_packets.length > 0) {
+//    try {
+        var server = server_reqs.shift();
+        var packets = output_packets;
+        output_packets = [];
+        var buf = build_packet(packets);
+        server.res.writeHeader(200, {"Content-Length": buf.length,
+                                     "Content-Type": "application/sashimi"
+                                    })
+        server.res.write(buf);
+        server.res.end();
+        status.connections.server.request++;
+//    } catch (e) {
+//      console.log('sender:ERROR:'+e);
+//      Array.prototype.push(output_packets, packets);
+//    }
+  }
+}
+
+var cleanup = function() {
+  var now = Date.now();
+  var server_timeout = 30000
+  for(var i = server_reqs.length-1; i >= 0; --i) {
+    if (now-server_timeout > server_reqs[i].now) {
+      var last_i = server_reqs.length-1;
+      if (i != last_i) {
+        var last = server_reqs[last_i]
+        server_reqs[last_i] = server_reqs[i]
+        server_reqs[i] = last
+      }
+      var server = server_reqs.pop();
+      server.res.writeHead(408, { "X-Sashimi": "server timeout:"+server_timeout});
+      server.res.end();
+      status.connections.server.timeout++;
+    }
+  }
+  var packet_timeout = 1000;
+  for(var i = output_packets.length-1; i >= 0; --i) {
+    if (now-packet_timeout > output_packets[i].now) {
+      var last_i = output_packets.length-1;
+      if (i != last_i) {
+        var last = output_packets[last_i]
+        output_packets[last_i] = output_packets[i]
+        output_packets[i] = last
+      }
+      output_packets.pop();
+      status.tun.queue.timeout++;
+    }
+  }
+}
+
+var Processor = function() {
+  this.queue = new Queue();
+  this.processor = this.bind(this, this.headerWait)
+  this.processLen = 4
+}
+Processor.prototype.bind = function(my, fn) { 
+  return function(data) { fn.apply(my, [data]) } 
+}
+Processor.prototype.add = function(data) { 
+  this.queue.add(data, this.processLen, this.processor)
+}
+Processor.prototype.dataWait = function(data) {
+//console.log("WRITE-TUN:", data.length, data);
+          fs.write(tun_fd, data, 0, data.length);
+          this.processor = this.bind(this, this.headerWait)
+          this.processLen = 4
+          var my = this;
+          this.add(null)
+      }
+Processor.prototype.headerWait = function(len) {
+          this.processLen = ~~len.toString('ascii', 0, 4)
+          this.processor = this.bind(this, this.dataWait)
+          var my = this;
+          this.add(null)
+      }
+
 if (mode == 'server') {
   console.log('SERVER-MODE');
+  var sender = server_sender;
   servers.forEach(function(server) { 
     console.log('LISTEN:'+server.peer.port+":"+server.peer.host);
-    net.createServer(function(stream) {
-      streamer(stream, null, server);
+    http.createServer(function(req, res) {
+      var processor = new Processor();
+      req.on('data', function(data) {
+        processor.add(data);
+      })
+      req.on('end', function() {
+console.log("REQUEST-END");
+        if (server_reqs.length > server_max_reqs) {
+          console.log("drop server request:"+server_max_reqs);
+          res.writeHead(503, "X-Sashimi: server busy:"+server_max_reqs);
+          res.end();
+          return;
+        }
+        server_reqs.push({req:req, res: res, now: Date.now()});
+        sender();
+      })
     }).listen(server.peer.port, server.peer.host);
   })
   packet_input();
   setTimeout(ping(output_streams, "SERV"), 1000);
+  setInterval(cleanup, 5000);
 } else if (mode == 'client') {
   console.log('CLIENT-MODE');
   var connections = []
-  var client_connect = function(server, stream) {
-    console.log('Connect peer='+server.peer.host+":"+ server.peer.port+" my="+server.my.host+":"+ server.my.port+":"+server['no_output'])
-    stream = net.createConnection(server.peer.port, server.peer.host, { bind: server.my });   
-    status.connections.client.connects++;
-    streamer(stream, {
-      closed: function() {
-                setTimeout(function() { 
-                  client_connect(server, stream); 
-                }, 1000);
-              }
-    }, server)
-  }
-  servers.forEach(function(server) { 
-    client_connect(server); 
-  })
-  //setTimeout(ping(output_streams), 1000);
-  packet_input();
-  setTimeout(function recvPing() {
-    //console.log("recvPing:"+ output_streams.length)
-    for(var i = output_streams.length - 1; i >= 0 ; --i) {
-      var stream =  output_streams[i]
-      if (!stream.recvPing) { stream.recvPing = { id: null, recv: (new Date()).getTime() } }
-      var now = (new Date()).getTime()
-      if ((now - stream.recvPing.recv) > 5000 && !stream.destroyed) {
-        console.log("LINK-DOWN-DETECTED:")
-        stream.destroyed = true
-        stream.destroy()
-      }
+  var open_connection = 3;
+  var current_server = 0;
+  var queue = new Queue();
+
+  var sender = function() {
+//    console.log("client-sender", connections.length, output_packets.length);
+    current_server = (current_server++) % servers.length
+
+    var packets = output_packets;
+    if (connections.length >= 3 && output_packets.length == 0) {
+      return;
     }
-    setTimeout(recvPing, 1000);
-  }, 1000);
+    output_packets = []
+    var buf = build_packet(packets)
+
+    var options = {
+      host: servers[current_server].peer.host,
+      port: servers[current_server].peer.port,
+      path: '/'+status.connections.client.connects++,
+      method: 'POST',
+      headers:  {
+                  "Content-Length": buf.length,
+                  "Content-Type": "application/sashimi"
+                }
+    }
+                      
+    var transaction = function(id, buf) {
+      var cleanup = function() {
+        for(var i = connections.length-1; i>=0; --i) {
+          if (connections[i].id == id) {
+            var lastId = connections.length-1
+            var last = connections[lastId]
+            connections[lastId] = connections[i]
+            connections[i] = last
+            connections.pop()
+//console.log("REMOVE", id, connections.length, lastId)
+            break;
+          }
+        }
+        sender();
+      }
+      var req = http.request(options, function(res) {
+//        console.log('STATUS: ' + res.statusCode);
+//        console.log('HEADERS: ' + JSON.stringify(res.headers));
+        var processor = new Processor()
+        res.on('data', function(data) {
+//console.log("RESP:", processLen);
+          processor.add(data);
+        })
+        res.on('error', cleanup);
+        res.on('end', cleanup);
+      })
+      req.on('error', function(e) { 
+        console.log("client_sender:", e); 
+        cleanup();
+        setTimeout(sender, 500);
+      })
+//console.log("WRITE-NET:", buf.length)
+      req.write(buf);
+      req.end();
+    }
+    if ((connections.length < 3 && output_packets.length == 0) || buf.length > 0) { 
+      connections.push({id: status.connections.client.connects,
+                        transaction: transaction(status.connections.client.connects, buf) })
+      sender();
+    }
+  }
+  sender();
+  packet_input();
 }
 
-var http = require('http');
-http.createServer(function (req, res) {
-  res.writeHead(200, {'Content-Type': 'application/json'});
-  status.connections.open = output_streams.length; 
-  res.end(JSON.stringify(status))
-}).listen(1706, "0.0.0.0");
+/*
+  http.createServer(function (req, res) {
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    status.connections.open = output_streams.length; 
+    res.end(JSON.stringify(status))
+  }).listen(1708, "0.0.0.0");
+  */
 
 setInterval(function() { 
   status.connections.open = output_streams.length; 

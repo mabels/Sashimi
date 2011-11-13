@@ -7,6 +7,29 @@
 
 #include <netinet/in.h>
 #include <net/if.h>
+
+#ifdef __APPLE_CC__
+int tun_alloc(char *dev)
+{
+  int fd = 0;
+  int i = 0;
+  for(i = 0; i < 255; ++i) {
+    char buf[128];
+    sprintf(buf, "/dev/tun%d", i);
+    printf("try:%s\n", buf);
+    if( (fd = open(buf, O_RDWR)) > 0 ) {
+      char *slash = strrchr(buf, '/');
+      if (slash) {
+        strcpy(dev, slash+1);
+      } else {
+        strcpy(dev, buf);
+      }
+      return fd; 
+    }
+  }
+  return -1;
+}
+#else 
 #include <sys/ioctl.h>
 #include <linux/if_tun.h>
 
@@ -37,6 +60,7 @@ int tun_alloc(char *dev)
 	strcpy(dev, ifr.ifr_name);
 	return fd;
 }              
+#endif
 
 int main(int argc, char **argv) {
 	char dev[100];
