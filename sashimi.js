@@ -88,9 +88,11 @@ var status = { in: 0,
 var output_packets = []
 var output_packets_max_length = 100;
 var packet_input = function() {
+console.log(build_packet_cnt)
+++build_packet_cnt
   var packet = new Buffer(1600); 
   /* tun has a 4byte header i currently not know what this means */
-  ofs = 0 // macos
+  var ofs = 0 // macos
   fs.read(tun_fd, packet, ofs, packet.length-ofs, null, function(err, len) {
     if (err) { 
       status.tun.input.err++;
@@ -110,6 +112,7 @@ var packet_input = function() {
     sender();
     packet_input();
   })
+--build_packet_cnt
 }
 
 var streamer = function(stream, fns, opts) {
@@ -268,6 +271,7 @@ console.log("PING DESTROY");
   }
 }
 
+var build_packet_cnt=0
 var build_packet = function(packets) {
         var len = 0;
         for(var i = 0, l = packets.length; i < l; ++i) {
@@ -401,16 +405,15 @@ console.log("REQUEST-END");
   var connections = []
   var open_connection = 3;
   var current_server = 0;
-  var queue = new Queue();
 
   var sender = function() {
 //    console.log("client-sender", connections.length, output_packets.length);
     current_server = (current_server++) % servers.length
 
-    var packets = output_packets;
     if (connections.length >= 3 && output_packets.length == 0) {
       return;
     }
+    var packets = output_packets;
     output_packets = []
     var buf = build_packet(packets)
 

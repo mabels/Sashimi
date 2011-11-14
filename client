@@ -1,0 +1,3 @@
+#!/bin/sh
+./tun `which node` client uplink hot hui 127.0.0.1:1205
+

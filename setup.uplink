@@ -1,0 +1,24 @@
+#!/bin/sh
+echo "XXXX:"$@
+if [ "$1" = 'server' ]
+then
+  echo "SETUP-SERVER"
+  my=192.168.181.1
+  peer=192.168.181.2
+  /sbin/ifconfig $3 $my $peer up
+  #/sbin/ip route add 192.168.69.0/24 via $peer dev $3
+  #/sbin/ip route add 172.16.69.0/24  via $peer dev $3
+  #/sbin/ip route add 10.9.24.0/23 via $peer dev $3
+fi
+
+if [ "$1" = 'client' ]
+then
+  echo "SETUP-CLIENT"
+  my=192.168.181.2
+  peer=192.168.181.1
+  /sbin/ifconfig $3 $my $peer up
+  #/sbin/ip route add 192.168.69.0/24 via $peer dev $3
+  #/sbin/ip route add 172.16.69.0/24  via $peer dev $3
+  #/sbin/ip route add 10.9.24.0/23 via $peer dev $3
+fi
+
